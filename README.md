@@ -79,6 +79,50 @@ npm start
 
 Open [http://localhost:3000](http://localhost:3000) in your mobile browser or mobile emulator.
 
+### Connecting to Real ArgoCD Server
+
+By default, the application uses mock data. To connect to a real ArgoCD server:
+
+1. **Copy the environment template:**
+   ```bash
+   cp .env.local.example .env.local
+   ```
+
+2. **Configure your ArgoCD server:**
+   ```bash
+   # Edit .env.local
+   NEXT_PUBLIC_ARGOCD_SERVER=https://argocd.example.com
+   NEXT_PUBLIC_ARGOCD_TOKEN=your-token-here
+   NEXT_PUBLIC_USE_MOCK_DATA=false
+   NEXT_PUBLIC_USE_PROXY=true
+   ```
+
+3. **Get your authentication token:**
+   ```bash
+   # Using ArgoCD CLI
+   argocd account generate-token
+
+   # Or from ArgoCD UI: Settings > Accounts > Generate Token
+   ```
+
+4. **Restart the dev server:**
+   ```bash
+   npm run dev
+   ```
+
+For detailed setup instructions, see [SETUP.md](SETUP.md).
+
+**Quick Setup for Kubernetes Port-Forward:**
+```bash
+# Port-forward ArgoCD server
+kubectl port-forward svc/argocd-server -n argocd 8080:443
+
+# Configure .env.local
+NEXT_PUBLIC_ARGOCD_SERVER=http://localhost:8080
+NEXT_PUBLIC_ARGOCD_TOKEN=<your-token>
+NEXT_PUBLIC_USE_MOCK_DATA=false
+```
+
 ## Usage
 
 ### Navigation Flow
@@ -104,18 +148,35 @@ Open [http://localhost:3000](http://localhost:3000) in your mobile browser or mo
 
 ## Development
 
-### Mock Data
+### Working with Real ArgoCD API
 
-By default, the application uses mock data. To connect to a real ArgoCD instance:
+The application supports both mock data (for development) and real ArgoCD servers:
 
-1. Update `lib/argocd-api.ts`:
-   ```typescript
-   export const argoCDAPI = new ArgoCDAPI('https://your-argocd-server/api/v1', false);
-   ```
+**Mock Mode** (default):
+```bash
+NEXT_PUBLIC_USE_MOCK_DATA=true
+```
 
-2. Handle authentication (add token/cookie handling as needed)
+**Real API Mode:**
+```bash
+NEXT_PUBLIC_USE_MOCK_DATA=false
+NEXT_PUBLIC_ARGOCD_SERVER=https://your-argocd-server
+NEXT_PUBLIC_ARGOCD_TOKEN=your-token
+```
 
-### Adding New Resource Types
+**Key Features:**
+- ✅ Supports any Kubernetes resource types and CRDs
+- ✅ Dynamic resource tree building from API response
+- ✅ Automatic parent-child relationship detection
+- ✅ Built-in CORS proxy (enabled by default)
+- ✅ Bearer token authentication
+- ✅ Error handling and logging
+
+See [SETUP.md](SETUP.md) for complete configuration options.
+
+### Adding New Mock Resource Types
+
+If you want to extend the mock data:
 
 1. Update mock data in `lib/mock-data.ts`
 2. Ensure types in `types/argocd.ts` cover the new resources

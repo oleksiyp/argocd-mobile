@@ -53,7 +53,7 @@ export default function NavigationView() {
   const loadResourceTree = async (app: Application) => {
     setLoading(true);
     try {
-      const resources = await argoCDAPI.getResourceTree(app.metadata.uid || '');
+      const resources = await argoCDAPI.getResourceTree(app.metadata.name);
 
       // Build tree structure
       const rootResources = resources.filter(r => !r.parentUid);
@@ -73,7 +73,7 @@ export default function NavigationView() {
       if (!allResources) {
         const app = navigationStack[0];
         if (isApplication(app)) {
-          allResources = await argoCDAPI.getResourceTree(app.metadata.uid || '');
+          allResources = await argoCDAPI.getResourceTree(app.metadata.name);
         }
       }
 
@@ -118,7 +118,7 @@ export default function NavigationView() {
 
       const app = newStack[0];
       if (isApplication(app)) {
-        argoCDAPI.getResourceTree(app.metadata.uid || '').then(resources => {
+        argoCDAPI.getResourceTree(app.metadata.name).then(resources => {
           if (newStack.length === 1) {
             // Back to root resources
             const rootResources = resources.filter(r => !r.parentUid);
@@ -158,7 +158,8 @@ export default function NavigationView() {
               app.metadata.name,
               item.namespace || '',
               item.kind,
-              item.name
+              item.name,
+              item.group
             );
           }
         }
