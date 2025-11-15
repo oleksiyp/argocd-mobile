@@ -227,7 +227,8 @@ export class ArgoCDAPI {
     namespace: string,
     kind: string,
     name: string,
-    group?: string
+    group?: string,
+    version?: string
   ): Promise<string> {
     if (this.useMockData) {
       await new Promise(resolve => setTimeout(resolve, 200));
@@ -239,7 +240,7 @@ export class ArgoCDAPI {
     }
 
     try {
-      // Build query parameters
+      // Build query parameters - all are required for accurate resource identification
       const params = new URLSearchParams({
         name,
         kind,
@@ -253,7 +254,13 @@ export class ArgoCDAPI {
         params.append('group', group);
       }
 
+      if (version) {
+        params.append('version', version);
+      }
+
       const url = getApiUrl(`/applications/${encodeURIComponent(appName)}/manifests?${params}`);
+      console.log(`Fetching manifest: ${kind}/${name} (namespace: ${namespace || 'none'}, group: ${group || 'none'}, version: ${version || 'none'})`);
+
       const response = await this.fetchWithAuth(url);
       const data: ArgoCDManifestResponse = await response.json();
 
@@ -262,6 +269,7 @@ export class ArgoCDAPI {
         return data.manifests[0];
       }
 
+      console.warn(`No manifest returned for ${kind}/${name}`);
       return '';
     } catch (error) {
       console.error(`Error fetching manifest for ${kind}/${name}:`, error);

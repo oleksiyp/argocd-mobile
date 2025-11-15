@@ -312,13 +312,24 @@ export default function NavigationView() {
 
       if (isApplication(item)) {
         // For applications, show the full spec
+        console.log('Showing YAML for application:', item.metadata.name);
         content = JSON.stringify(item, null, 2); // Convert to YAML-like format
         // Better: convert to actual YAML
         const yaml = require('js-yaml');
         content = yaml.dump(item);
       } else if (isResource(item)) {
+        console.log('Showing YAML for resource:', {
+          uid: item.uid,
+          kind: item.kind,
+          name: item.name,
+          namespace: item.namespace,
+          group: item.group,
+          version: item.version,
+        });
+
         // For resources, use the manifest if available
         if (item.manifest) {
+          console.log('Using cached manifest');
           content = item.manifest;
         } else {
           // Fetch from API - use provided appName or get from navigationStack
@@ -331,12 +342,14 @@ export default function NavigationView() {
           }
 
           if (appNameToUse) {
+            console.log('Fetching manifest from API for app:', appNameToUse);
             content = await argoCDAPI.getResourceManifest(
               appNameToUse,
               item.namespace || '',
               item.kind,
               item.name,
-              item.group
+              item.group,
+              item.version
             );
           }
         }
