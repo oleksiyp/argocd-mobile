@@ -17,6 +17,11 @@ A mobile-optimized UI for ArgoCD built with Next.js, featuring Norton Commander-
   - Toggle auto-refresh on/off
   - Manual refresh button
   - Updates applications and resource trees in real-time
+- **URL-Based Navigation**: Full browser back/forward button support
+  - Each navigation level has its own URL
+  - YAML viewer has dedicated routes
+  - Shareable URLs for specific views
+  - Browser history integration
 - **YAML Viewer**: Full-screen, distraction-free YAML viewer with:
   - Syntax highlighting
   - Smart formatting (metadata and status at top)

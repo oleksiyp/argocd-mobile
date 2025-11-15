@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { Application, ResourceTreeNode } from '@/types/argocd';
 import { argoCDAPI } from '@/lib/argocd-api';
 import ResourceCard from './ResourceCard';
@@ -20,6 +21,9 @@ function isResource(item: NavigationItem): item is ResourceTreeNode {
 }
 
 export default function NavigationView() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
   const [navigationStack, setNavigationStack] = useState<NavigationItem[]>([]);
   const [currentItems, setCurrentItems] = useState<NavigationItem[]>([]);
   const [allResources, setAllResources] = useState<ResourceTreeNode[]>([]); // Store all resources for tree navigation
@@ -33,15 +37,122 @@ export default function NavigationView() {
   // YAML viewer state
   const [showYamlViewer, setShowYamlViewer] = useState(false);
   const [yamlContent, setYamlContent] = useState('');
+  const [yamlItem, setYamlItem] = useState<NavigationItem | null>(null);
 
   // Auto-refresh state
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [refreshInterval, setRefreshInterval] = useState(30000); // 30 seconds
 
-  // Load initial applications
+  // Sync state from URL on mount and when URL changes
   useEffect(() => {
-    loadApplications();
-  }, []);
+    syncFromUrl();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  const syncFromUrl = useCallback(async () => {
+    const app = searchParams.get('app');
+    const resourcePath = searchParams.get('path');
+    const yamlId = searchParams.get('yaml');
+
+    // Handle YAML viewer
+    if (yamlId) {
+      await handleYamlFromUrl(yamlId, app);
+      return;
+    }
+
+    // Clear YAML viewer if not in URL
+    if (showYamlViewer) {
+      setShowYamlViewer(false);
+      setYamlItem(null);
+    }
+
+    if (!app) {
+      // Root view - applications list
+      await loadApplications();
+      return;
+    }
+
+    // Load application and navigate to resource path
+    await loadApplicationFromUrl(app, resourcePath);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, showYamlViewer]);
+
+  const handleYamlFromUrl = async (yamlId: string, appName: string | null) => {
+    setLoading(true);
+    try {
+      if (appName) {
+        // YAML for a resource
+        const resources = await argoCDAPI.getResourceTree(appName);
+        const resource = resources.find(r => r.uid === yamlId);
+        if (resource) {
+          await showYamlDirect(resource);
+        }
+      } else {
+        // YAML for an application
+        const apps = await argoCDAPI.getApplications();
+        const application = apps.find(a => a.metadata.name === yamlId);
+        if (application) {
+          await showYamlDirect(application);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading YAML from URL:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadApplicationFromUrl = async (appName: string, resourcePath: string | null) => {
+    setLoading(true);
+    try {
+      const apps = await argoCDAPI.getApplications();
+      const app = apps.find(a => a.metadata.name === appName);
+
+      if (!app) {
+        // App not found, go back to apps list
+        router.push('/');
+        return;
+      }
+
+      const resources = await argoCDAPI.getResourceTree(appName);
+      setAllResources(resources);
+
+      if (!resourcePath) {
+        // Show root resources
+        const rootResources = resources.filter(r => !r.parentUid);
+        setCurrentItems(rootResources);
+        setNavigationStack([app]);
+      } else {
+        // Navigate to specific resource path
+        const uids = resourcePath.split('/');
+        const stack: NavigationItem[] = [app];
+
+        let currentParentUid: string | undefined = undefined;
+
+        for (const uid of uids) {
+          const resource = resources.find(r => r.uid === uid);
+          if (!resource) break;
+          stack.push(resource);
+          currentParentUid = uid;
+        }
+
+        // Show children of last resource in path
+        if (currentParentUid) {
+          const children = resources.filter(r => r.parentUid === currentParentUid);
+          setCurrentItems(children);
+        } else {
+          const rootResources = resources.filter(r => !r.parentUid);
+          setCurrentItems(rootResources);
+        }
+
+        setNavigationStack(stack);
+      }
+    } catch (error) {
+      console.error('Error loading from URL:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Auto-refresh effect
   useEffect(() => {
@@ -59,13 +170,16 @@ export default function NavigationView() {
     }, refreshInterval);
 
     return () => clearInterval(interval);
-  }, [autoRefresh, refreshInterval, navigationStack]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoRefresh, refreshInterval, navigationStack.length]);
 
   const loadApplications = async () => {
     setLoading(true);
     try {
       const apps = await argoCDAPI.getApplications();
       setCurrentItems(apps);
+      setNavigationStack([]);
+      setAllResources([]);
     } catch (error) {
       console.error('Error loading applications:', error);
     } finally {
@@ -89,6 +203,8 @@ export default function NavigationView() {
 
       if (!isRefresh) {
         setNavigationStack([app]);
+        // Update URL
+        router.push(`?app=${encodeURIComponent(app.metadata.name)}`);
       }
     } catch (error) {
       console.error('Error loading resource tree:', error);
@@ -116,8 +232,20 @@ export default function NavigationView() {
       const children = resources.filter(r => r.parentUid === resource.uid);
 
       if (children.length > 0) {
+        const newStack = [...navigationStack, resource];
         setCurrentItems(children);
-        setNavigationStack([...navigationStack, resource]);
+        setNavigationStack(newStack);
+
+        // Update URL with resource path
+        const app = navigationStack[0];
+        if (isApplication(app)) {
+          const resourcePath = newStack
+            .slice(1)
+            .filter(isResource)
+            .map(r => r.uid)
+            .join('/');
+          router.push(`?app=${encodeURIComponent(app.metadata.name)}&path=${resourcePath}`);
+        }
       } else {
         // No children, just show YAML
         await showYaml(resource);
@@ -157,31 +285,28 @@ export default function NavigationView() {
 
     if (navigationStack.length === 1) {
       // Go back to applications list
-      setNavigationStack([]);
-      setAllResources([]); // Clear resource cache
-      loadApplications();
+      router.push('/');
     } else {
       // Go back one level in resource tree
-      const newStack = navigationStack.slice(0, -1);
-      setNavigationStack(newStack);
+      const app = navigationStack[0];
+      if (isApplication(app)) {
+        const newStack = navigationStack.slice(0, -1);
+        const resourcePath = newStack
+          .slice(1)
+          .filter(isResource)
+          .map(r => r.uid)
+          .join('/');
 
-      // Use cached resources
-      if (newStack.length === 1) {
-        // Back to root resources
-        const rootResources = allResources.filter(r => !r.parentUid);
-        setCurrentItems(rootResources);
-      } else {
-        // Back to parent's children
-        const parent = newStack[newStack.length - 1];
-        if (isResource(parent)) {
-          const children = allResources.filter(r => r.parentUid === parent.uid);
-          setCurrentItems(children);
+        if (resourcePath) {
+          router.push(`?app=${encodeURIComponent(app.metadata.name)}&path=${resourcePath}`);
+        } else {
+          router.push(`?app=${encodeURIComponent(app.metadata.name)}`);
         }
       }
     }
   };
 
-  const showYaml = async (item: NavigationItem) => {
+  const showYamlDirect = async (item: NavigationItem) => {
     try {
       let content = '';
 
@@ -211,10 +336,28 @@ export default function NavigationView() {
       }
 
       setYamlContent(content);
+      setYamlItem(item);
       setShowYamlViewer(true);
     } catch (error) {
       console.error('Error loading YAML:', error);
     }
+  };
+
+  const showYaml = async (item: NavigationItem) => {
+    // Update URL for YAML view
+    if (isApplication(item)) {
+      router.push(`?yaml=${encodeURIComponent(item.metadata.name)}`);
+    } else if (isResource(item)) {
+      const app = navigationStack[0];
+      if (isApplication(app)) {
+        router.push(`?app=${encodeURIComponent(app.metadata.name)}&yaml=${item.uid}`);
+      }
+    }
+  };
+
+  const closeYamlViewer = () => {
+    // Navigate back using browser history
+    router.back();
   };
 
   // Filter and search logic
@@ -332,11 +475,7 @@ export default function NavigationView() {
           {navigationStack.length > 0 && (
             <div className="flex items-center gap-1 text-xs text-gray-500 overflow-x-auto scrollbar-hide">
               <button
-                onClick={() => {
-                  setNavigationStack([]);
-                  setAllResources([]);
-                  loadApplications();
-                }}
+                onClick={() => router.push('/')}
                 className="hover:text-blue-600 whitespace-nowrap"
               >
                 Apps
@@ -407,7 +546,7 @@ export default function NavigationView() {
       {showYamlViewer && (
         <YamlViewer
           yamlContent={yamlContent}
-          onClose={() => setShowYamlViewer(false)}
+          onClose={closeYamlViewer}
         />
       )}
     </div>
