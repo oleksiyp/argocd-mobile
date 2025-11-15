@@ -85,14 +85,14 @@ export default function NavigationView() {
         const resources = await argoCDAPI.getResourceTree(appName);
         const resource = resources.find(r => r.uid === yamlId);
         if (resource) {
-          await showYamlDirect(resource);
+          await showYamlDirect(resource, appName);
         }
       } else {
         // YAML for an application
         const apps = await argoCDAPI.getApplications();
         const application = apps.find(a => a.metadata.name === yamlId);
         if (application) {
-          await showYamlDirect(application);
+          await showYamlDirect(application, null);
         }
       }
     } catch (error) {
@@ -306,7 +306,7 @@ export default function NavigationView() {
     }
   };
 
-  const showYamlDirect = async (item: NavigationItem) => {
+  const showYamlDirect = async (item: NavigationItem, appName: string | null = null) => {
     try {
       let content = '';
 
@@ -321,11 +321,18 @@ export default function NavigationView() {
         if (item.manifest) {
           content = item.manifest;
         } else {
-          // Fetch from API
-          const app = navigationStack[0];
-          if (isApplication(app)) {
+          // Fetch from API - use provided appName or get from navigationStack
+          let appNameToUse = appName;
+          if (!appNameToUse) {
+            const app = navigationStack[0];
+            if (isApplication(app)) {
+              appNameToUse = app.metadata.name;
+            }
+          }
+
+          if (appNameToUse) {
             content = await argoCDAPI.getResourceManifest(
-              app.metadata.name,
+              appNameToUse,
               item.namespace || '',
               item.kind,
               item.name,

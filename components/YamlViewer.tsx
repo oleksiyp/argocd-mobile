@@ -23,10 +23,16 @@ export default function YamlViewer({ yamlContent, onClose }: YamlViewerProps) {
         return;
       }
 
-      // Create restructured object with metadata and status at top
+      // Create restructured object with proper field ordering
       const restructured: any = {};
 
-      // 1. Minimal metadata at top
+      // 1. apiVersion (first)
+      if (parsed.apiVersion) restructured.apiVersion = parsed.apiVersion;
+
+      // 2. kind (second)
+      if (parsed.kind) restructured.kind = parsed.kind;
+
+      // 3. Minimal metadata (third)
       if (parsed.metadata) {
         restructured.metadata = {
           name: parsed.metadata.name,
@@ -50,23 +56,14 @@ export default function YamlViewer({ yamlContent, onClose }: YamlViewerProps) {
         }
       }
 
-      // 2. API info
-      if (parsed.apiVersion) restructured.apiVersion = parsed.apiVersion;
-      if (parsed.kind) restructured.kind = parsed.kind;
-
-      // 3. Spec (main configuration)
-      if (parsed.spec) {
-        restructured.spec = parsed.spec;
-      }
-
-      // 4. Status at the end (if exists)
+      // 4. Status (fourth)
       if (parsed.status) {
         restructured.status = parsed.status;
       }
 
-      // 5. Any other fields
+      // 5. All other fields including spec
       Object.keys(parsed).forEach(key => {
-        if (!['metadata', 'apiVersion', 'kind', 'spec', 'status'].includes(key)) {
+        if (!['metadata', 'apiVersion', 'kind', 'status'].includes(key)) {
           restructured[key] = parsed[key];
         }
       });
