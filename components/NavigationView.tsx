@@ -22,6 +22,7 @@ function isResource(item: NavigationItem): item is ResourceTreeNode {
 export default function NavigationView() {
   const [navigationStack, setNavigationStack] = useState<NavigationItem[]>([]);
   const [currentItems, setCurrentItems] = useState<NavigationItem[]>([]);
+  const [allResources, setAllResources] = useState<ResourceTreeNode[]>([]); // Store all resources for tree navigation
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
 
@@ -33,10 +34,32 @@ export default function NavigationView() {
   const [showYamlViewer, setShowYamlViewer] = useState(false);
   const [yamlContent, setYamlContent] = useState('');
 
+  // Auto-refresh state
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [refreshInterval, setRefreshInterval] = useState(30000); // 30 seconds
+
   // Load initial applications
   useEffect(() => {
     loadApplications();
   }, []);
+
+  // Auto-refresh effect
+  useEffect(() => {
+    if (!autoRefresh) return;
+
+    const interval = setInterval(() => {
+      // Refresh current view
+      if (navigationStack.length === 0) {
+        // Refresh applications list
+        loadApplications();
+      } else if (navigationStack.length === 1 && isApplication(navigationStack[0])) {
+        // Refresh resource tree
+        loadResourceTree(navigationStack[0], true);
+      }
+    }, refreshInterval);
+
+    return () => clearInterval(interval);
+  }, [autoRefresh, refreshInterval, navigationStack]);
 
   const loadApplications = async () => {
     setLoading(true);
@@ -50,35 +73,47 @@ export default function NavigationView() {
     }
   };
 
-  const loadResourceTree = async (app: Application) => {
-    setLoading(true);
+  const loadResourceTree = async (app: Application, isRefresh: boolean = false) => {
+    if (!isRefresh) {
+      setLoading(true);
+    }
     try {
       const resources = await argoCDAPI.getResourceTree(app.metadata.name);
 
-      // Build tree structure
+      // Store all resources for children lookup
+      setAllResources(resources);
+
+      // Build tree structure - show only root resources
       const rootResources = resources.filter(r => !r.parentUid);
       setCurrentItems(rootResources);
-      setNavigationStack([app]);
+
+      if (!isRefresh) {
+        setNavigationStack([app]);
+      }
     } catch (error) {
       console.error('Error loading resource tree:', error);
     } finally {
-      setLoading(false);
+      if (!isRefresh) {
+        setLoading(false);
+      }
     }
   };
 
-  const loadChildResources = async (resource: ResourceTreeNode, allResources?: ResourceTreeNode[]) => {
+  const loadChildResources = async (resource: ResourceTreeNode) => {
     setLoading(true);
     try {
-      // If we don't have all resources, fetch them
-      if (!allResources) {
+      // Use stored resources or fetch if needed
+      let resources = allResources;
+      if (resources.length === 0) {
         const app = navigationStack[0];
         if (isApplication(app)) {
-          allResources = await argoCDAPI.getResourceTree(app.metadata.name);
+          resources = await argoCDAPI.getResourceTree(app.metadata.name);
+          setAllResources(resources);
         }
       }
 
       // Find children of this resource
-      const children = allResources?.filter(r => r.parentUid === resource.uid) || [];
+      const children = resources.filter(r => r.parentUid === resource.uid);
 
       if (children.length > 0) {
         setCurrentItems(children);
@@ -92,6 +127,19 @@ export default function NavigationView() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Helper to check if a resource has children
+  const hasChildren = (item: NavigationItem): boolean => {
+    if (isApplication(item)) {
+      // Applications always have resources (we'll check on drill-down)
+      return true;
+    }
+    if (isResource(item)) {
+      // Check if any resource has this as parent
+      return allResources.some(r => r.parentUid === item.uid);
+    }
+    return false;
   };
 
   const getCurrentTitle = (): string => {
@@ -110,28 +158,25 @@ export default function NavigationView() {
     if (navigationStack.length === 1) {
       // Go back to applications list
       setNavigationStack([]);
+      setAllResources([]); // Clear resource cache
       loadApplications();
     } else {
       // Go back one level in resource tree
       const newStack = navigationStack.slice(0, -1);
       setNavigationStack(newStack);
 
-      const app = newStack[0];
-      if (isApplication(app)) {
-        argoCDAPI.getResourceTree(app.metadata.name).then(resources => {
-          if (newStack.length === 1) {
-            // Back to root resources
-            const rootResources = resources.filter(r => !r.parentUid);
-            setCurrentItems(rootResources);
-          } else {
-            // Back to parent's children
-            const parent = newStack[newStack.length - 1];
-            if (isResource(parent)) {
-              const children = resources.filter(r => r.parentUid === parent.uid);
-              setCurrentItems(children);
-            }
-          }
-        });
+      // Use cached resources
+      if (newStack.length === 1) {
+        // Back to root resources
+        const rootResources = allResources.filter(r => !r.parentUid);
+        setCurrentItems(rootResources);
+      } else {
+        // Back to parent's children
+        const parent = newStack[newStack.length - 1];
+        if (isResource(parent)) {
+          const children = allResources.filter(r => r.parentUid === parent.uid);
+          setCurrentItems(children);
+        }
       }
     }
   };
@@ -233,9 +278,54 @@ export default function NavigationView() {
                 </svg>
               </button>
             )}
-            <h1 className="text-lg font-bold text-gray-900">
+            <h1 className="text-lg font-bold text-gray-900 flex-1">
               {getCurrentTitle()}
             </h1>
+
+            {/* Auto-refresh toggle and manual refresh button */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  if (navigationStack.length === 0) {
+                    loadApplications();
+                  } else if (navigationStack.length === 1 && isApplication(navigationStack[0])) {
+                    loadResourceTree(navigationStack[0]);
+                  }
+                }}
+                className="p-2 rounded-full hover:bg-gray-100 text-gray-600 transition-colors"
+                aria-label="Refresh"
+                title="Manual refresh"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                  />
+                </svg>
+              </button>
+
+              <button
+                onClick={() => setAutoRefresh(!autoRefresh)}
+                className={`p-2 rounded-full transition-colors ${
+                  autoRefresh
+                    ? 'bg-blue-100 text-blue-600 hover:bg-blue-200'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+                aria-label="Toggle auto-refresh"
+                title={autoRefresh ? 'Auto-refresh ON (30s)' : 'Auto-refresh OFF'}
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+              </button>
+            </div>
           </div>
 
           {/* Breadcrumb */}
@@ -244,6 +334,7 @@ export default function NavigationView() {
               <button
                 onClick={() => {
                   setNavigationStack([]);
+                  setAllResources([]);
                   loadApplications();
                 }}
                 className="hover:text-blue-600 whitespace-nowrap"
@@ -298,10 +389,12 @@ export default function NavigationView() {
               item={item}
               type={isApplication(item) ? 'application' : 'resource'}
               onDrillDown={
-                isApplication(item)
-                  ? () => loadResourceTree(item)
-                  : isResource(item)
-                  ? () => loadChildResources(item)
+                hasChildren(item)
+                  ? isApplication(item)
+                    ? () => loadResourceTree(item)
+                    : isResource(item)
+                    ? () => loadChildResources(item)
+                    : undefined
                   : undefined
               }
               onShowYaml={() => showYaml(item)}

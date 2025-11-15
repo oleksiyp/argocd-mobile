@@ -20,6 +20,7 @@ interface ArgoCDResourceTreeResponse {
       name: string;
       namespace?: string;
       group: string;
+      uid?: string;
     }>;
     health?: {
       status: string;
@@ -31,7 +32,14 @@ interface ArgoCDResourceTreeResponse {
     images?: string[];
     resourceVersion?: string;
     createdAt?: string;
+    // Owner references for true parent-child relationships
+    info?: Array<{
+      name: string;
+      value: string;
+    }>;
   }>;
+  // Optional: ArgoCD may also include orphanedNodes
+  orphanedNodes?: Array<any>;
 }
 
 interface ArgoCDManifestResponse {
@@ -116,27 +124,22 @@ export class ArgoCDAPI {
 
       // Build tree structure with parent-child relationships
       const nodes = data.nodes || [];
-      const treeNodes: ResourceTreeNode[] = nodes.map((node, index) => {
+
+      // Use a smarter approach: only consider true ownership relationships
+      // Kubernetes ownership: Deployment -> ReplicaSet -> Pod
+      // StatefulSet -> Pod, Service (NOT ConfigMap/Secret)
+      const ownershipRules = this.buildOwnershipMap(nodes);
+
+      const treeNodes: ResourceTreeNode[] = nodes.map((node) => {
         // Calculate depth based on parent references
         let depth = 0;
         let parentUid: string | undefined;
 
-        if (node.parentRefs && node.parentRefs.length > 0) {
-          // Find the parent in the nodes array
-          const parentRef = node.parentRefs[0];
-          const parent = nodes.find(
-            n =>
-              n.kind === parentRef.kind &&
-              n.name === parentRef.name &&
-              n.namespace === parentRef.namespace &&
-              n.group === parentRef.group
-          );
-
-          if (parent) {
-            parentUid = parent.uid;
-            // Calculate depth recursively
-            depth = this.calculateDepth(parent, nodes);
-          }
+        // Use actual parent from ownership map
+        const actualParent = ownershipRules.get(node.uid);
+        if (actualParent) {
+          parentUid = actualParent.uid;
+          depth = this.calculateDepthFromMap(actualParent, ownershipRules);
         }
 
         return {
@@ -166,28 +169,57 @@ export class ArgoCDAPI {
     }
   }
 
-  private calculateDepth(
-    node: ArgoCDResourceTreeResponse['nodes'][0],
-    allNodes: ArgoCDResourceTreeResponse['nodes']
-  ): number {
-    if (!node.parentRefs || node.parentRefs.length === 0) {
-      return 0;
+  private buildOwnershipMap(
+    nodes: ArgoCDResourceTreeResponse['nodes']
+  ): Map<string, ArgoCDResourceTreeResponse['nodes'][0]> {
+    const ownershipMap = new Map<string, ArgoCDResourceTreeResponse['nodes'][0]>();
+
+    // Known Kubernetes ownership patterns
+    const validChildRelationships: Record<string, string[]> = {
+      'Deployment': ['ReplicaSet'],
+      'ReplicaSet': ['Pod'],
+      'StatefulSet': ['Pod'],
+      'DaemonSet': ['Pod'],
+      'Job': ['Pod'],
+      'CronJob': ['Job'],
+    };
+
+    for (const node of nodes) {
+      if (!node.parentRefs || node.parentRefs.length === 0) continue;
+
+      // Check each parent ref
+      for (const parentRef of node.parentRefs) {
+        const parent = nodes.find(
+          n =>
+            n.kind === parentRef.kind &&
+            n.name === parentRef.name &&
+            n.namespace === parentRef.namespace &&
+            n.group === parentRef.group
+        );
+
+        if (!parent) continue;
+
+        // Validate this is a true ownership relationship
+        const validChildren = validChildRelationships[parent.kind];
+        if (validChildren && validChildren.includes(node.kind)) {
+          ownershipMap.set(node.uid, parent);
+          break; // Use first valid parent
+        }
+      }
     }
 
-    const parentRef = node.parentRefs[0];
-    const parent = allNodes.find(
-      n =>
-        n.kind === parentRef.kind &&
-        n.name === parentRef.name &&
-        n.namespace === parentRef.namespace &&
-        n.group === parentRef.group
-    );
+    return ownershipMap;
+  }
 
+  private calculateDepthFromMap(
+    node: ArgoCDResourceTreeResponse['nodes'][0],
+    ownershipMap: Map<string, ArgoCDResourceTreeResponse['nodes'][0]>
+  ): number {
+    const parent = ownershipMap.get(node.uid);
     if (!parent) {
       return 0;
     }
-
-    return 1 + this.calculateDepth(parent, allNodes);
+    return 1 + this.calculateDepthFromMap(parent, ownershipMap);
   }
 
   async getResourceManifest(

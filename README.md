@@ -8,7 +8,15 @@ A mobile-optimized UI for ArgoCD built with Next.js, featuring Norton Commander-
 
 - **Application List View**: Browse all ArgoCD applications as cards with health and sync status
 - **Norton Commander Navigation**: Drill down into resources using an intuitive left-to-right navigation pattern
-- **Resource Tree**: Navigate through Kubernetes resources in a hierarchical tree structure
+- **Smart Resource Tree**: Navigate through Kubernetes resources with intelligent hierarchy detection
+  - Proper parent-child relationships (Deployment → ReplicaSet → Pod)
+  - Prevents incorrect associations (e.g., ConfigMaps under StatefulSets)
+  - Only shows drill-down button when children exist
+  - Works with any Kubernetes resource types and CRDs
+- **Dynamic Updates**: Auto-refresh with configurable polling (30s default)
+  - Toggle auto-refresh on/off
+  - Manual refresh button
+  - Updates applications and resource trees in real-time
 - **YAML Viewer**: Full-screen, distraction-free YAML viewer with:
   - Syntax highlighting
   - Smart formatting (metadata and status at top)
